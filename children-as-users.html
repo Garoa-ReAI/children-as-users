@@ -1,0 +1,230 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <style>
+        body { margin: 0; overflow: hidden; background: black; }
+        canvas { display: block; }
+    </style>
+</head>
+<body>
+    <canvas id="canvas"></canvas>
+    <script>
+        const canvas = document.getElementById('canvas');
+        const ctx = canvas.getContext('2d');
+        
+        function resize() {
+            canvas.width = window.innerWidth;
+            canvas.height = window.innerHeight;
+        }
+        resize();
+        window.addEventListener('resize', resize);
+
+        const imageUrls = [
+            'Face1.png',
+            'Face2.png',
+            'Face3.png'
+        ];
+
+        const images = imageUrls.map(url => {
+            const img = new Image();
+            img.src = url;
+            return img;
+        });
+
+        class LaserTrail {
+            constructor() {
+                this.points = [];
+                this.maxPoints = 10;
+            }
+
+            addPoint(x, y) {
+                this.points.push({ x, y, alpha: 1 });
+                if (this.points.length > this.maxPoints) {
+                    this.points.shift();
+                }
+            }
+
+            draw() {
+                if (this.points.length < 2) return;
+                for (let i = 0; i < this.points.length - 1; i++) {
+                    const point = this.points[i];
+                    const nextPoint = this.points[i + 1];
+                    
+                    ctx.beginPath();
+                    ctx.moveTo(point.x, point.y);
+                    ctx.lineTo(nextPoint.x, nextPoint.y);
+                    ctx.strokeStyle = `rgba(255, 0, 0, ${point.alpha * 0.5})`;
+                    ctx.lineWidth = 3;
+                    ctx.stroke();
+                    
+                    ctx.beginPath();
+                    ctx.moveTo(point.x, point.y);
+                    ctx.lineTo(nextPoint.x, nextPoint.y);
+                    ctx.strokeStyle = `rgba(255, 100, 100, ${point.alpha * 0.3})`;
+                    ctx.lineWidth = 6;
+                    ctx.stroke();
+
+                    point.alpha *= 0.9;
+                }
+            }
+        }
+
+        // Define child figures (made smaller)
+        const childFigure = [
+            [-15, -20, -15, 0],    // left arm
+            [15, -20, 15, 0],      // right arm
+            [0, -30, 0, 0],        // body
+            [-10, 0, -10, 30],     // left leg
+            [10, 0, 10, 30],       // right leg
+            [0, -40, 8]            // head
+        ];
+
+        const laserTrail = new LaserTrail();
+        let mouseX = undefined;
+        let mouseY = undefined;
+
+        class ImageParticle {
+            constructor(x, y, targetGroup) {
+                this.x = x;
+                this.y = y;
+                this.targetX = x;
+                this.targetY = y;
+                this.targetGroup = targetGroup; // Assign to specific figure
+                this.vx = (Math.random() - 0.5) * 2;
+                this.vy = (Math.random() - 0.5) * 2;
+                this.imageIndex = Math.floor(Math.random() * images.length);
+                this.size = 15; // Smaller particles
+                this.rotation = Math.random() * Math.PI * 2;
+                this.avoidanceForce = 3;
+                this.avoidanceRadius = 200;
+                this.returnSpeed = 0.002; // Much slower formation speed
+            }
+
+            update() {
+                if (mouseX !== undefined && mouseY !== undefined) {
+                    const dx = mouseX - this.x;
+                    const dy = mouseY - this.y;
+                    const distance = Math.sqrt(dx * dx + dy * dy);
+                    
+                    if (distance < this.avoidanceRadius) {
+                        const angle = Math.atan2(dy, dx);
+                        const force = (1 - distance / this.avoidanceRadius) * this.avoidanceForce;
+                        this.vx -= Math.cos(angle) * force;
+                        this.vy -= Math.sin(angle) * force;
+                        this.rotation += 0.1;
+                        
+                        this.vx += (Math.random() - 0.5) * force;
+                        this.vy += (Math.random() - 0.5) * force;
+                    }
+                }
+
+                const tdx = this.targetX - this.x;
+                const tdy = this.targetY - this.y;
+                this.vx += tdx * this.returnSpeed;
+                this.vy += tdy * this.returnSpeed;
+
+                this.vx *= 0.98;
+                this.vy *= 0.98;
+
+                this.x += this.vx;
+                this.y += this.vy;
+
+                const distanceToTarget = Math.sqrt(tdx * tdx + tdy * tdy);
+                if (distanceToTarget < 5) {
+                    this.rotation *= 0.95;
+                }
+
+                if (this.x < 0 || this.x > canvas.width) this.vx *= -1;
+                if (this.y < 0 || this.y > canvas.height) this.vy *= -1;
+            }
+
+            draw() {
+                ctx.save();
+                ctx.translate(this.x, this.y);
+                ctx.rotate(this.rotation);
+                ctx.drawImage(
+                    images[this.imageIndex], 
+                    -this.size / 2, 
+                    -this.size / 2, 
+                    this.size, 
+                    this.size
+                );
+                ctx.restore();
+            }
+        }
+
+        // Create particles for three figures
+        const particles = [];
+        const particlesPerFigure = 100;
+        for (let i = 0; i < 3; i++) {
+            for (let j = 0; j < particlesPerFigure; j++) {
+                particles.push(new ImageParticle(
+                    Math.random() * canvas.width,
+                    Math.random() * canvas.height,
+                    i // Assign to specific figure
+                ));
+            }
+        }
+
+        function updateTargets() {
+            const figureSpacing = canvas.width / 4; // Space figures evenly
+            
+            particles.forEach((particle, index) => {
+                const figureIndex = particle.targetGroup;
+                const particleIndexInGroup = index % particlesPerFigure;
+                const scale = 1.5; // Smaller scale
+                
+                // Calculate offset for each figure
+                const offsetX = figureSpacing * (figureIndex + 1);
+                const offsetY = canvas.height / 2;
+                
+                if (particleIndexInGroup < childFigure.length * 10) {
+                    // Body parts
+                    const lineIndex = Math.floor(particleIndexInGroup / 10);
+                    const t = (particleIndexInGroup % 10) / 10;
+                    
+                    if (lineIndex < childFigure.length - 1) {
+                        const [x1, y1, x2, y2] = childFigure[lineIndex];
+                        particle.targetX = offsetX + (x1 + (x2 - x1) * t) * scale;
+                        particle.targetY = offsetY + (y1 + (y2 - y1) * t) * scale;
+                    } else {
+                        // Head
+                        const [hx, hy, hr] = childFigure[childFigure.length - 1];
+                        const angle = (particleIndexInGroup % 10) / 10 * Math.PI * 2;
+                        particle.targetX = offsetX + (hx + Math.cos(angle) * hr) * scale;
+                        particle.targetY = offsetY + (hy + Math.sin(angle) * hr) * scale;
+                    }
+                }
+            });
+        }
+
+        canvas.addEventListener('mousemove', (e) => {
+            mouseX = e.clientX;
+            mouseY = e.clientY;
+            laserTrail.addPoint(mouseX, mouseY);
+        });
+
+        canvas.addEventListener('mouseleave', () => {
+            mouseX = undefined;
+            mouseY = undefined;
+        });
+
+        function animate() {
+            ctx.fillStyle = 'rgba(0, 0, 0, 0.2)';
+            ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+            laserTrail.draw();
+
+            particles.forEach(particle => {
+                particle.update();
+                particle.draw();
+            });
+
+            requestAnimationFrame(animate);
+        }
+
+        updateTargets();
+        animate();
+    </script>
+</body>
+</html>
